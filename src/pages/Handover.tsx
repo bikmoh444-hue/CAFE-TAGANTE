@@ -1,35 +1,27 @@
-import { useState, useEffect } from 'react';
-import { 
-  ArrowRightLeft, 
-  Save, 
-  Loader2, 
-  CheckCircle2, 
-  AlertCircle, 
-  Clock,
-  User,
-  MessageSquare,
-  Check
-} from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { Save, Check, AlertCircle, ArrowRightLeft } from 'lucide-react';
+import { format } from 'date-fns';
 import { supabase } from '../lib/supabase';
+import { ServerHandover, ServerReport } from '../types';
 import { cn } from '../lib/utils';
 
-export default function Handover() {
+export default function HandoverPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+  const [date, setDate] = useState(format(new Date(), 'yyyy-MM-dd'));
   const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
 
-  const [handover, setHandover] = useState({
-    from_server: '',
-    to_server: '',
-    handover_time: new Date().toTimeString().substring(0, 5),
-    tajine_poulet_transferred: 0,
-    tajine_viande_transferred: 0,
-    m9la_viande_transferred: 0,
-    m9la_tayba_transferred: 0,
-    tajine_kbir_transferred: 0,
+  const [formData, setFormData] = useState<Partial<ServerHandover>>({
+    source_server: '',
+    destination_server: '',
+    handover_time: format(new Date(), 'HH:mm'),
+    tajine_sghir_poulet_transmitted: 0,
+    tajine_sghir_viande_transmitted: 0,
+    m9la_viande_transmitted: 0,
+    m9la_tayba_transmitted: 0,
+    tajine_kbir_transmitted: 0,
     note: '',
-    confirmed: false
+    is_confirmed: false,
   });
 
   useEffect(() => {
@@ -39,251 +31,213 @@ export default function Handover() {
   const fetchHandover = async () => {
     setLoading(true);
     try {
-      const { data } = await supabase
-        .from('handovers')
+      const { data, error } = await supabase
+        .from('server_handovers')
         .select('*')
         .eq('date', date)
         .single();
 
       if (data) {
-        setHandover({
-          ...data,
-          handover_time: data.handover_time.substring(0, 5),
-        });
+        setFormData(data);
       } else {
-        // Try to fetch morning report to pre-fill stock
+        // Try to fetch morning report to pre-fill remaining stock
         const { data: morningReport } = await supabase
           .from('server_reports')
           .select('*')
           .eq('date', date)
-          .eq('shift', 'morning')
+          .eq('shift', 'matin')
           .single();
 
-        if (morningReport) {
-          setHandover(prev => ({
-            ...prev,
-            from_server: morningReport.server_name,
-            tajine_poulet_transferred: morningReport.tajine_poulet_remaining,
-            tajine_viande_transferred: morningReport.tajine_viande_remaining,
-            m9la_viande_transferred: morningReport.m9la_viande_remaining,
-            m9la_tayba_transferred: morningReport.m9la_tayba_remaining,
-            tajine_kbir_transferred: morningReport.tajine_kbir_remaining,
-          }));
-        }
+        setFormData({
+          source_server: morningReport?.server_name || '',
+          destination_server: '',
+          handover_time: format(new Date(), 'HH:mm'),
+          tajine_sghir_poulet_transmitted: morningReport?.tajine_sghir_poulet_remaining || 0,
+          tajine_sghir_viande_transmitted: morningReport?.tajine_sghir_viande_remaining || 0,
+          m9la_viande_transmitted: morningReport?.m9la_viande_remaining || 0,
+          m9la_tayba_transmitted: morningReport?.m9la_tayba_remaining || 0,
+          tajine_kbir_transmitted: morningReport?.tajine_kbir_remaining || 0,
+          note: '',
+          is_confirmed: false,
+        });
       }
     } catch (err) {
-      console.error(err);
+      console.error('Error fetching handover:', err);
     } finally {
       setLoading(false);
     }
   };
 
-  const handleInputChange = (field: string, value: any) => {
-    setHandover(prev => ({ ...prev, [field]: value }));
-  };
-
-  const saveHandover = async () => {
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
     setSaving(true);
     setMessage(null);
+
     try {
       const payload = {
-        ...handover,
-        date
+        ...formData,
+        date,
       };
 
-      const { data: existing } = await supabase
-        .from('handovers')
-        .select('id')
-        .eq('date', date)
-        .single();
-
-      if (existing) {
+      if ((formData as any).id) {
         const { error } = await supabase
-          .from('handovers')
+          .from('server_handovers')
           .update(payload)
-          .eq('id', existing.id);
+          .eq('id', (formData as any).id);
         if (error) throw error;
       } else {
         const { error } = await supabase
-          .from('handovers')
-          .insert(payload);
+          .from('server_handovers')
+          .insert([payload]);
         if (error) throw error;
       }
 
       setMessage({ type: 'success', text: 'Passation enregistrée avec succès !' });
-    } catch (err: any) {
-      setMessage({ type: 'error', text: err.message || 'Erreur lors de l\'enregistrement' });
+      fetchHandover();
+    } catch (err) {
+      console.error('Error saving handover:', err);
+      setMessage({ type: 'error', text: 'Erreur lors de l\'enregistrement.' });
     } finally {
       setSaving(false);
     }
   };
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <Loader2 className="w-8 h-8 animate-spin text-slate-400" />
-      </div>
-    );
-  }
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    const { name, value, type } = e.target;
+    setFormData(prev => ({
+      ...prev,
+      [name]: type === 'number' ? Number(value) : value
+    }));
+  };
 
   return (
-    <div className="space-y-8">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
-        <div className="flex items-center gap-4">
-          <div className="w-12 h-12 rounded-xl bg-slate-900 flex items-center justify-center text-white">
-            <ArrowRightLeft className="w-6 h-6" />
-          </div>
-          <div>
-            <h3 className="text-xl font-bold text-slate-900">Passation entre Serveurs</h3>
-            <p className="text-sm text-slate-500">Transfert du stock restant entre shifts</p>
-          </div>
-        </div>
+    <div className="max-w-4xl mx-auto space-y-6">
+      <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div className="flex items-center gap-3">
-          <input 
-            type="date" 
-            value={date}
-            onChange={(e) => setDate(e.target.value)}
-            className="px-4 py-2 rounded-xl border border-slate-200 focus:ring-2 focus:ring-slate-900 outline-none transition"
-          />
-          <button 
-            onClick={saveHandover}
-            disabled={saving}
-            className="flex items-center gap-2 bg-slate-900 text-white px-6 py-2 rounded-xl font-semibold hover:bg-slate-800 transition disabled:opacity-50"
-          >
-            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-            Enregistrer
-          </button>
+          <ArrowRightLeft className="h-6 w-6 text-amber-600" />
+          <h2 className="text-xl font-bold text-gray-900">Passation entre Serveurs</h2>
         </div>
+        <input
+          type="date"
+          value={date}
+          onChange={(e) => setDate(e.target.value)}
+          className="block border-gray-300 rounded-lg focus:ring-amber-500 focus:border-amber-500 sm:text-sm"
+        />
       </div>
 
       {message && (
         <div className={cn(
-          "p-4 rounded-xl flex items-center gap-3 animate-in fade-in slide-in-from-top-2",
-          message.type === 'success' ? "bg-emerald-50 text-emerald-700 border border-emerald-100" : "bg-red-50 text-red-700 border border-red-100"
+          "p-4 rounded-xl flex items-center gap-3",
+          message.type === 'success' ? "bg-green-50 text-green-700 border border-green-100" : "bg-red-50 text-red-700 border border-red-100"
         )}>
-          {message.type === 'success' ? <CheckCircle2 className="w-5 h-5" /> : <AlertCircle className="w-5 h-5" />}
-          <span className="font-medium">{message.text}</span>
+          {message.type === 'success' ? <Check className="h-5 w-5" /> : <AlertCircle className="h-5 w-5" />}
+          <p className="text-sm font-medium">{message.text}</p>
         </div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        {/* Left Column: Info */}
-        <div className="space-y-8">
-          <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm space-y-6">
-            <h4 className="font-bold text-slate-900 flex items-center gap-2">
-              <User className="w-5 h-5 text-slate-400" />
-              Acteurs & Heure
-            </h4>
-            <div className="space-y-4">
+      <form onSubmit={handleSubmit} className="space-y-6">
+        <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="space-y-4">
+            <h3 className="text-lg font-semibold text-gray-900 border-b pb-2">Détails de Passation</h3>
+            <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1 block">Serveur Source (Matin)</label>
-                <input 
+                <label className="block text-sm font-medium text-gray-700 mb-1">Serveur Sortant (Matin)</label>
+                <input
                   type="text"
-                  placeholder="Nom..."
-                  value={handover.from_server}
-                  onChange={(e) => handleInputChange('from_server', e.target.value)}
-                  className="w-full px-4 py-2 bg-slate-50 border border-slate-100 rounded-xl focus:ring-2 focus:ring-slate-900 outline-none transition"
+                  name="source_server"
+                  required
+                  value={formData.source_server}
+                  onChange={handleInputChange}
+                  className="block w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-amber-500 focus:border-amber-500 sm:text-sm"
                 />
               </div>
               <div>
-                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1 block">Serveur Destination (Soir)</label>
-                <input 
+                <label className="block text-sm font-medium text-gray-700 mb-1">Serveur Entrant (Soir)</label>
+                <input
                   type="text"
-                  placeholder="Nom..."
-                  value={handover.to_server}
-                  onChange={(e) => handleInputChange('to_server', e.target.value)}
-                  className="w-full px-4 py-2 bg-slate-50 border border-slate-100 rounded-xl focus:ring-2 focus:ring-slate-900 outline-none transition"
+                  name="destination_server"
+                  required
+                  value={formData.destination_server}
+                  onChange={handleInputChange}
+                  className="block w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-amber-500 focus:border-amber-500 sm:text-sm"
                 />
               </div>
-              <div>
-                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1 block">Heure de Passation</label>
-                <div className="relative">
-                  <input 
-                    type="time"
-                    value={handover.handover_time}
-                    onChange={(e) => handleInputChange('handover_time', e.target.value)}
-                    className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-100 rounded-xl focus:ring-2 focus:ring-slate-900 outline-none transition"
-                  />
-                  <Clock className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                </div>
-              </div>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Heure de Passation</label>
+              <input
+                type="time"
+                name="handover_time"
+                required
+                value={formData.handover_time}
+                onChange={handleInputChange}
+                className="block w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-amber-500 focus:border-amber-500 sm:text-sm"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Note / Remarque</label>
+              <textarea
+                name="note"
+                rows={3}
+                value={formData.note || ''}
+                onChange={handleInputChange}
+                className="block w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-amber-500 focus:border-amber-500 sm:text-sm"
+                placeholder="Ex: Tout est en ordre, attention au gaz..."
+              />
+            </div>
+            <div className="flex items-center">
+              <input
+                type="checkbox"
+                id="is_confirmed"
+                name="is_confirmed"
+                checked={formData.is_confirmed}
+                onChange={(e) => setFormData({ ...formData, is_confirmed: e.target.checked })}
+                className="h-4 w-4 text-amber-600 focus:ring-amber-500 border-gray-300 rounded"
+              />
+              <label htmlFor="is_confirmed" className="ml-2 block text-sm text-gray-900">
+                Confirmation de réception par le serveur du soir
+              </label>
             </div>
           </div>
 
-          <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm space-y-4">
-            <h4 className="font-bold text-slate-900 flex items-center gap-2">
-              <MessageSquare className="w-5 h-5 text-slate-400" />
-              Note & Confirmation
-            </h4>
-            <textarea 
-              placeholder="Notes éventuelles..."
-              rows={3}
-              value={handover.note}
-              onChange={(e) => handleInputChange('note', e.target.value)}
-              className="w-full px-4 py-2 bg-slate-50 border border-slate-100 rounded-xl focus:ring-2 focus:ring-slate-900 outline-none transition resize-none"
-            />
-            <button 
-              onClick={() => handleInputChange('confirmed', !handover.confirmed)}
-              className={cn(
-                "w-full flex items-center justify-center gap-2 py-3 rounded-xl font-bold transition",
-                handover.confirmed 
-                  ? "bg-emerald-100 text-emerald-700 border border-emerald-200" 
-                  : "bg-slate-100 text-slate-500 border border-slate-200 hover:bg-slate-200"
-              )}
-            >
-              <Check className={cn("w-5 h-5", handover.confirmed ? "opacity-100" : "opacity-30")} />
-              {handover.confirmed ? "Réception Confirmée" : "Confirmer Réception"}
-            </button>
+          <div className="space-y-4">
+            <h3 className="text-lg font-semibold text-gray-900 border-b pb-2">Stock Transmis (Restant)</h3>
+            <div className="space-y-3">
+              <StockInput label="Tajine Sghir Poulet" name="tajine_sghir_poulet_transmitted" value={formData.tajine_sghir_poulet_transmitted} onChange={handleInputChange} />
+              <StockInput label="Tajine Sghir Viande" name="tajine_sghir_viande_transmitted" value={formData.tajine_sghir_viande_transmitted} onChange={handleInputChange} />
+              <StockInput label="M9la Viande" name="m9la_viande_transmitted" value={formData.m9la_viande_transmitted} onChange={handleInputChange} />
+              <StockInput label="M9la Tayba" name="m9la_tayba_transmitted" value={formData.m9la_tayba_transmitted} onChange={handleInputChange} />
+              <StockInput label="Tajine Kbir" name="tajine_kbir_transmitted" value={formData.tajine_kbir_transmitted} onChange={handleInputChange} />
+            </div>
           </div>
         </div>
 
-        {/* Right Column: Stock */}
-        <div className="lg:col-span-2 bg-white p-8 rounded-2xl border border-slate-100 shadow-sm">
-          <h4 className="font-bold text-slate-900 mb-8">Stock Transmis</h4>
-          
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {[
-              { id: 'tajine_poulet_transferred', label: 'Tajine Sghir Poulet' },
-              { id: 'tajine_viande_transferred', label: 'Tajine Sghir Viande' },
-              { id: 'm9la_viande_transferred', label: 'M9la Viande' },
-              { id: 'm9la_tayba_transferred', label: 'M9la Tayba' },
-              { id: 'tajine_kbir_transferred', label: 'Tajine Kbir' },
-            ].map((item) => (
-              <div key={item.id} className="p-4 rounded-2xl bg-slate-50 border border-slate-100 flex items-center justify-between">
-                <span className="font-semibold text-slate-700">{item.label}</span>
-                <div className="flex items-center gap-3">
-                  <button 
-                    onClick={() => handleInputChange(item.id, Math.max(0, (handover as any)[item.id] - 1))}
-                    className="w-8 h-8 rounded-lg bg-white border border-slate-200 flex items-center justify-center text-slate-600 hover:bg-slate-900 hover:text-white transition"
-                  >
-                    -
-                  </button>
-                  <input 
-                    type="number"
-                    value={(handover as any)[item.id]}
-                    onChange={(e) => handleInputChange(item.id, parseInt(e.target.value) || 0)}
-                    className="w-12 text-center bg-transparent font-bold text-slate-900 outline-none"
-                  />
-                  <button 
-                    onClick={() => handleInputChange(item.id, (handover as any)[item.id] + 1)}
-                    className="w-8 h-8 rounded-lg bg-white border border-slate-200 flex items-center justify-center text-slate-600 hover:bg-slate-900 hover:text-white transition"
-                  >
-                    +
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-
-          <div className="mt-10 p-6 rounded-2xl bg-blue-50 border border-blue-100">
-            <p className="text-sm text-blue-700 leading-relaxed">
-              <strong>Note :</strong> Le serveur du soir verra ce stock reçu comme son stock de départ. 
-              Assurez-vous que les quantités correspondent au stock physique restant à la fin du shift matin.
-            </p>
-          </div>
+        <div className="flex justify-end">
+          <button
+            type="submit"
+            disabled={saving || loading}
+            className="inline-flex items-center px-8 py-3 border border-transparent rounded-lg shadow-sm text-base font-medium text-white bg-amber-600 hover:bg-amber-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-amber-500 transition-colors disabled:opacity-50"
+          >
+            <Save className="mr-2 h-5 w-5" />
+            {saving ? 'Enregistrement...' : 'Enregistrer la passation'}
+          </button>
         </div>
-      </div>
+      </form>
+    </div>
+  );
+}
+
+function StockInput({ label, name, value, onChange }: any) {
+  return (
+    <div className="flex items-center justify-between gap-4">
+      <span className="text-sm font-medium text-gray-600">{label}</span>
+      <input
+        type="number"
+        name={name}
+        value={value}
+        onChange={onChange}
+        className="block w-24 px-3 py-1 border border-gray-300 rounded-lg focus:ring-amber-500 focus:border-amber-500 text-sm text-center"
+      />
     </div>
   );
 }

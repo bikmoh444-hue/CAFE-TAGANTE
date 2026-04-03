@@ -39,6 +39,7 @@ export interface ServerReport {
   start_time: string | null;
   end_time: string | null;
   total_drinks_breakfast: number;
+  extra_expenses?: number;
   
   tajine_sghir_poulet_sold: number;
   tajine_sghir_poulet_remaining: number;

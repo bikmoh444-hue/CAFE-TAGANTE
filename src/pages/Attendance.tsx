@@ -306,7 +306,7 @@ export default function Dashboard() {
                 <YAxis axisLine={false} tickLine={false} tick={{fill: '#6b7280', fontSize: 12}} />
                 <Tooltip 
                   contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)' }}
-                  formatter={(value: number) => [formatCurrency(value), '']}
+                  formatter={(value: any) => formatCurrency(Number(value || 0))}
                 />
                 <Area type="monotone" dataKey="recette" stroke="#059669" fillOpacity={1} fill="url(#colorRecette)" strokeWidth={2} />
               </AreaChart>
@@ -324,7 +324,7 @@ export default function Dashboard() {
                 <YAxis axisLine={false} tickLine={false} tick={{fill: '#6b7280', fontSize: 12}} />
                 <Tooltip 
                   contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)' }}
-                  formatter={(value: number) => [formatCurrency(value), '']}
+                  formatter={(value: any) => formatCurrency(Number(value || 0))}
                 />
                 <Bar dataKey="recette" fill="#059669" radius={[4, 4, 0, 0]} />
                 <Bar dataKey="depense" fill="#dc2626" radius={[4, 4, 0, 0]} />
